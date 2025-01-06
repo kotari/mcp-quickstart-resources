@@ -1,6 +1,9 @@
 import asyncio
 from typing import Optional
 from contextlib import AsyncExitStack
+import ollama
+import uuid
+
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -46,6 +49,17 @@ class MCPClient:
         tools = response.tools
         print("\nConnected to server with tools:", [tool.name for tool in tools])
 
+    def convert_to_openai_format(self, tools):
+        """Convert tools to OpenAI format"""
+        return [{
+            "type": "function",
+            "function": {
+                "name": tool["name"],
+                "description": tool.get("description", ""),
+                "parameters": tool.get("inputSchema", {})   
+            }
+        } for tool in tools]
+
     async def process_query(self, query: str) -> str:
         """Process a query using Claude and available tools"""
         messages = [
@@ -62,51 +76,115 @@ class MCPClient:
             "input_schema": tool.inputSchema
         } for tool in response.tools]
 
+        available_tools = self.convert_to_openai_format(available_tools)
+
         # Initial Claude API call
-        response = self.anthropic.messages.create(
-            model="claude-3-5-sonnet-20241022",
-            max_tokens=1000,
+        # response = self.anthropic.messages.create(
+        #     model="claude-3-5-sonnet-20241022",
+        #     max_tokens=1000,
+        #     messages=messages,
+        #     tools=available_tools
+        # )
+        # Switching to ollama
+        response = ollama.chat(
+            model="llama3.2:3b-instruct-fp16", # model supporting chat functionality
             messages=messages,
-            tools=available_tools
+            tools=available_tools or [],
+            stream=False,
         )
 
         # Process response and handle tool calls
         tool_results = []
         final_text = []
+        # print(response)
+        message = response.message
+        tool_calls = []
+        if hasattr(message, "tool_calls") and message.tool_calls:
+            for tool in message.tool_calls:
+                tool_calls.append({
+                    "id": str(uuid.uuid4()),
+                    "type": "function",
+                    "function": {
+                        "name": tool.function.name,
+                        "arguments": tool.function.arguments,
+                    }
+                })
 
-        for content in response.content:
-            if content.type == 'text':
-                final_text.append(content.text)
-            elif content.type == 'tool_use':
-                tool_name = content.name
-                tool_args = content.input
-                
-                # Execute tool call
+        if tool_calls:
+            for tool_call in tool_calls:
+                if hasattr(tool_call, "function"):
+                    tool_name = getattr(tool_call.function, "name", "no tool found")
+                    tool_args = getattr(tool_call.function, "arguments", {})
+                elif isinstance(tool_call, dict) and "function" in tool_call:
+                    fn_info = tool_call["function"]
+                    tool_name = fn_info.get("name", "no tool found")
+                    tool_args = fn_info.get("arguments", {})
+                else:
+                    tool_name = "no tool found"
+                    tool_args = {}
+
                 result = await self.session.call_tool(tool_name, tool_args)
                 tool_results.append({"call": tool_name, "result": result})
                 final_text.append(f"[Calling tool {tool_name} with args {tool_args}]")
 
-                # Continue conversation with tool results
-                if hasattr(content, 'text') and content.text:
-                    messages.append({
-                      "role": "assistant",
-                      "content": content.text
-                    })
-                messages.append({
-                    "role": "user", 
-                    "content": result.content
-                })
+                data = result.model_dump()
+                if data.get("isError"):
+                    return f"function call for {tool_name} failed with arguments {tool_args}"
+                else:
+                    for content in data.get("content", []):
+                        if isinstance(content, dict) and content.get("type") == "text":
+                            messages.append({
+                                "role": "user",
+                                "content": content.get("text")
+                            })
+                            # print(messages)
+                            response = ollama.chat(
+                                model="llama3.2:3b-instruct-fp16", # model supporting chat functionality
+                                messages=messages,
+                                stream=False,
+                                options={"num_ctx": 1024}
+                            )
+                            # return content.get("text")
+                            # print(response)
+                            final_text.append(response.message.content)
+                            
+                    return "\n".join(final_text)
+                # tool_results.append({"call": tool_name, "result": result})
+                # final_text.append(f"[Calling tool {tool_name} with args {tool_args}]")
 
-                # Get next response from Claude
-                response = self.anthropic.messages.create(
-                    model="claude-3-5-sonnet-20241022",
-                    max_tokens=1000,
-                    messages=messages,
-                )
+        # for content in response.content:
+        #     if content.type == 'text':
+        #         final_text.append(content.text)
+        #     elif content.type == 'tool_use':
+        #         tool_name = content.name
+        #         tool_args = content.input
+                
+        #         # Execute tool call
+        #         result = await self.session.call_tool(tool_name, tool_args)
+        #         tool_results.append({"call": tool_name, "result": result})
+        #         final_text.append(f"[Calling tool {tool_name} with args {tool_args}]")
 
-                final_text.append(response.content[0].text)
+        #         # Continue conversation with tool results
+        #         if hasattr(content, 'text') and content.text:
+        #             messages.append({
+        #               "role": "assistant",
+        #               "content": content.text
+        #             })
+        #         messages.append({
+        #             "role": "user", 
+        #             "content": result.content
+        #         })
 
-        return "\n".join(final_text)
+        #         # Get next response from Claude
+        #         response = self.anthropic.messages.create(
+        #             model="claude-3-5-sonnet-20241022",
+        #             max_tokens=1000,
+        #             messages=messages,
+        #         )
+
+        #         final_text.append(response.content[0].text)
+
+        # return "\n".join(final_text)
 
     async def chat_loop(self):
         """Run an interactive chat loop"""
