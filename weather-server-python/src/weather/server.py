@@ -37,16 +37,16 @@ async def handle_list_tools() -> list[types.Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "latitude": {
+                    "lat": {
                         "type": "number",
                         "description": "Latitude of the location",
                     },
-                    "longitude": {
+                    "lon": {
                         "type": "number",
                         "description": "Longitude of the location",
                     },
                 },
-                "required": ["latitude", "longitude"],
+                "required": ["lat", "lon"],
             },
         ),
     ]
@@ -120,8 +120,8 @@ async def handle_call_tool(
             ]
     elif name == "get-forecast":
         try:
-            latitude = float(arguments.get("latitude"))
-            longitude = float(arguments.get("longitude"))
+            latitude = float(arguments.get("lat"))
+            longitude = float(arguments.get("lon"))
         except (TypeError, ValueError):
             return [types.TextContent(
                 type="text",
