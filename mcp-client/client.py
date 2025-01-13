@@ -59,10 +59,44 @@ class MCPClient:
                 "parameters": tool.get("inputSchema", {})   
             }
         } for tool in tools]
+    
+
+    def get_system_prompt(self):
+        prompt = """
+You are a weather agent interacting with users to extract the intent and making an API call to national weather service.\n\n
+National weather service expects the query parameters in a predefined format to provide results. \n\n
+
+Predefined format expects two char state code or latitude and longitude for a given US city. \n
+You are responsible for translating the user intent to either \n
+```
+{
+    "state": f{state_code} #This will be a 2 char US state code
+}
+```\n
+or
+```
+{
+    "latitude": f"{latitude}",
+    "longitude": f"{longitude}"
+}
+```\n
+for function calling. \n
+
+
+
+If you are not able get the intent from user input ask them for further clarification or you can respond with \n
+'I am  not able to interpret the intent of your request'\n\n
+"""
+        return prompt
 
     async def process_query(self, query: str) -> str:
         """Process a query using Claude and available tools"""
+
         messages = [
+            {
+                "role": "system",
+                "content": self.get_system_prompt()
+            },
             {
                 "role": "user",
                 "content": query
@@ -96,7 +130,7 @@ class MCPClient:
         # Process response and handle tool calls
         tool_results = []
         final_text = []
-        # print(response)
+        # print("step 1:", str(response))
         message = response.message
         tool_calls = []
         if hasattr(message, "tool_calls") and message.tool_calls:
@@ -128,13 +162,16 @@ class MCPClient:
                 final_text.append(f"[Calling tool {tool_name} with args {tool_args}]")
 
                 data = result.model_dump()
+                # print("\nfunction calling response:\n")
+                # print(data)
                 if data.get("isError"):
                     return f"function call for {tool_name} failed with arguments {tool_args}"
                 else:
+                    messages = messages[1:]
                     for content in data.get("content", []):
                         if isinstance(content, dict) and content.get("type") == "text":
                             messages.append({
-                                "role": "user",
+                                "role": "tool",
                                 "content": content.get("text")
                             })
                             # print(messages)
@@ -145,6 +182,7 @@ class MCPClient:
                                 options={"num_ctx": 1024}
                             )
                             # return content.get("text")
+                            # print("\nsummary:\n")
                             # print(response)
                             final_text.append(response.message.content)
                             
