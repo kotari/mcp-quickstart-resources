@@ -181,13 +181,21 @@ If you are not able get the intent from user input ask them for further clarific
                     return f"function call for {tool_name} failed with arguments {tool_args}"
                 else:
                     messages = messages[1:]
+                    # updating messages (conversation history) with system calls
+                    messages.append( {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [tool_call]
+                    })
+                    
                     for content in data.get("content", []):
                         if isinstance(content, dict) and content.get("type") == "text":
+                            print(Panel(Markdown(content.get("text")), style="bold green", title="Raw response"))
                             messages.append({
                                 "role": "tool",
                                 "content": content.get("text")
                             })
-                            # print(messages)
+                            # print(json.dumps(messages, indent=2))
                             response = ollama.chat(
                                 model=self.model, # model supporting chat functionality
                                 messages=messages,
@@ -198,6 +206,7 @@ If you are not able get the intent from user input ask them for further clarific
                             # print("\nsummary:\n")
                             # print(response)
                             final_text.append(response.message.content)
+
                             
                     return "\n".join(final_text)
                 # tool_results.append({"call": tool_name, "result": result})
@@ -257,7 +266,7 @@ If you are not able get the intent from user input ask them for further clarific
 
                 response = await self.process_query(query)
                 # print("\n" + response)
-                print(Panel(Markdown(response), style="bold blue", title="Assistant"))
+                print(Panel(Markdown(response), style="bold blue", title="Assistant Summary"))
                     
             except Exception as e:
                 print(f"\nError: {str(e)}")
