@@ -3,6 +3,12 @@ from typing import Optional
 from contextlib import AsyncExitStack
 import ollama
 import uuid
+import json
+
+from rich import print
+from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.prompt import Prompt
 
 
 from mcp import ClientSession, StdioServerParameters
@@ -19,6 +25,8 @@ class MCPClient:
         self.session: Optional[ClientSession] = None
         self.exit_stack = AsyncExitStack()
         self.anthropic = Anthropic()
+        self.model = "llama3.2:3b-instruct-fp16"
+        
 
     async def connect_to_server(self, server_script_path: str):
         """Connect to an MCP server
@@ -89,6 +97,7 @@ If you are not able get the intent from user input ask them for further clarific
 """
         return prompt
 
+
     async def process_query(self, query: str) -> str:
         """Process a query using Claude and available tools"""
 
@@ -121,7 +130,7 @@ If you are not able get the intent from user input ask them for further clarific
         # )
         # Switching to ollama
         response = ollama.chat(
-            model="llama3.2:3b-instruct-fp16", # model supporting chat functionality
+            model=self.model, # model supporting chat functionality
             messages=messages,
             tools=available_tools or [],
             stream=False,
@@ -157,9 +166,13 @@ If you are not able get the intent from user input ask them for further clarific
                     tool_name = "no tool found"
                     tool_args = {}
 
+                tool_args_str = json.dumps(tool_args, indent=2)
+                tool_md = f"**Tool Call:** {tool_name}\n\n```json\n{tool_args_str}\n```"
+                print(Panel(Markdown(tool_md), style="bold magenta", title="Tool Invocation"))
+
                 result = await self.session.call_tool(tool_name, tool_args)
                 tool_results.append({"call": tool_name, "result": result})
-                final_text.append(f"[Calling tool {tool_name} with args {tool_args}]")
+                # final_text.append(f"[Calling tool {tool_name} with args {tool_args}]")
 
                 data = result.model_dump()
                 # print("\nfunction calling response:\n")
@@ -176,7 +189,7 @@ If you are not able get the intent from user input ask them for further clarific
                             })
                             # print(messages)
                             response = ollama.chat(
-                                model="llama3.2:3b-instruct-fp16", # model supporting chat functionality
+                                model=self.model, # model supporting chat functionality
                                 messages=messages,
                                 stream=False,
                                 options={"num_ctx": 1024}
@@ -224,6 +237,7 @@ If you are not able get the intent from user input ask them for further clarific
 
         # return "\n".join(final_text)
 
+
     async def chat_loop(self):
         """Run an interactive chat loop"""
         print("\nMCP Client Started!")
@@ -231,13 +245,19 @@ If you are not able get the intent from user input ask them for further clarific
         
         while True:
             try:
-                query = input("\nQuery: ").strip()
-                
+                # query = input("\nQuery: ").strip()
+                query = Prompt.ask("[bold yellow]Query> [/bold yellow]")
+
                 if query.lower() == 'quit':
+                    print(Panel("Exiting chate mode.", style="bold red"))
                     break
                     
+                query_text = query if query else "[No Message]"
+                print(Panel(query_text, style="bold yellow", title="You"))
+
                 response = await self.process_query(query)
-                print("\n" + response)
+                # print("\n" + response)
+                print(Panel(Markdown(response), style="bold blue", title="Assistant"))
                     
             except Exception as e:
                 print(f"\nError: {str(e)}")
