@@ -62,40 +62,11 @@ class MCPClient:
         return [{
             "type": "function",
             "function": {
-                "name": tool["name"],
-                "description": tool.get("description", ""),
-                "parameters": tool.get("inputSchema", {})   
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.inputSchema
             }
         } for tool in tools]
-    
-
-    def get_system_prompt(self):
-        prompt = """
-You are a weather agent interacting with users to extract the intent and making an API call to national weather service.\n\n
-National weather service expects the query parameters in a predefined format to provide results. \n\n
-
-Predefined format expects two char state code or latitude and longitude for a given US city. \n
-You are responsible for translating the user intent to either \n
-```
-{
-    "state": f{state_code} #This will be a 2 char US state code
-}
-```\n
-or
-```
-{
-    "latitude": f"{latitude}",
-    "longitude": f"{longitude}"
-}
-```\n
-for function calling. \n
-
-
-
-If you are not able get the intent from user input ask them for further clarification or you can respond with \n
-'I am  not able to interpret the intent of your request'\n\n
-"""
-        return prompt
 
 
     async def process_query(self, query: str) -> str:
@@ -103,24 +74,20 @@ If you are not able get the intent from user input ask them for further clarific
 
         messages = [
             {
-                "role": "system",
-                "content": self.get_system_prompt()
-            },
-            {
                 "role": "user",
                 "content": query
             }
         ]
 
         response = await self.session.list_tools()
-        available_tools = [{ 
-            "name": tool.name,
-            "description": tool.description,
-            "input_schema": tool.inputSchema
-        } for tool in response.tools]
+        # available_tools = [{ 
+        #     "name": tool.name,
+        #     "description": tool.description,
+        #     "input_schema": tool.inputSchema
+        # } for tool in response.tools]
 
-        available_tools = self.convert_to_openai_format(available_tools)
-
+        available_tools = self.convert_to_openai_format(response.tools)
+        
         # Initial Claude API call
         # response = self.anthropic.messages.create(
         #     model="claude-3-5-sonnet-20241022",
@@ -180,7 +147,6 @@ If you are not able get the intent from user input ask them for further clarific
                 if data.get("isError"):
                     return f"function call for {tool_name} failed with arguments {tool_args}"
                 else:
-                    messages = messages[1:]
                     # updating messages (conversation history) with system calls
                     messages.append( {
                         "role": "assistant",
