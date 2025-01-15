@@ -4,6 +4,9 @@ from contextlib import AsyncExitStack
 import ollama
 import uuid
 import json
+import logging
+import logging.config
+import sys
 
 from rich import print
 from rich.markdown import Markdown
@@ -18,6 +21,16 @@ from anthropic import Anthropic
 from dotenv import load_dotenv
 
 load_dotenv()  # load environment variables from .env
+# Configure logging
+logging.config.dictConfig({
+    'version': 1,
+    'disable_existing_loggers': True,
+})
+logging.basicConfig(
+  level=logging.CRITICAL,
+  format="%(asctime)s - %(levelname)s - %(message)s",
+  stream=sys.stderr,
+)
 
 class MCPClient:
     def __init__(self):
@@ -106,7 +119,7 @@ class MCPClient:
         # Process response and handle tool calls
         tool_results = []
         final_text = []
-        # print("step 1:", str(response))
+        logging.debug("step 1: " + str(response))
         message = response.message
         tool_calls = []
         if hasattr(message, "tool_calls") and message.tool_calls:
@@ -142,8 +155,7 @@ class MCPClient:
                 # final_text.append(f"[Calling tool {tool_name} with args {tool_args}]")
 
                 data = result.model_dump()
-                # print("\nfunction calling response:\n")
-                # print(data)
+                logging.debug(data)
                 if data.get("isError"):
                     return f"function call for {tool_name} failed with arguments {tool_args}"
                 else:
@@ -161,20 +173,19 @@ class MCPClient:
                                 "role": "tool",
                                 "content": content.get("text")
                             })
-                            # print(json.dumps(messages, indent=2))
+                            logging.debug(json.dumps(messages, indent=2))
                             response = ollama.chat(
                                 model=self.model, # model supporting chat functionality
                                 messages=messages,
-                                stream=False,
+                                stream=True,
                                 options={"num_ctx": 1024}
                             )
-                            # return content.get("text")
-                            # print("\nsummary:\n")
-                            # print(response)
-                            final_text.append(response.message.content)
-
+                            for chunk in response:
+                                # print(chunk['message']['content'], end='', flush=True)
+                                final_text.append(chunk.message.content)
                             
-                    return "\n".join(final_text)
+                            
+                    return "".join(final_text)
                 # tool_results.append({"call": tool_name, "result": result})
                 # final_text.append(f"[Calling tool {tool_name} with args {tool_args}]")
 
@@ -231,7 +242,7 @@ class MCPClient:
                 print(Panel(query_text, style="bold yellow", title="You"))
 
                 response = await self.process_query(query)
-                # print("\n" + response)
+                logging.debug(response)
                 print(Panel(Markdown(response), style="bold blue", title="Assistant Summary"))
                     
             except Exception as e:
